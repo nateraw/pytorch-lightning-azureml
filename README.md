@@ -11,7 +11,7 @@ cd pytorch-lightning-azureml/
 ```
 conda create -n pl_azureml_env -y python=3.6 --no-default-packages
 conda activate pl_azureml_env
-pip install -r requirements.txt
+pip install -r dev_requirements.txt
 ```
 
 #### Create a new AzureML Workspace resource in Azure Portal
