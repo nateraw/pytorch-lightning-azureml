@@ -11,3 +11,8 @@ pip install -r requirements.txt
 #### Create a new AzureML resource in Azure Portal
 
 ![](images/create-workspace.gif)
+
+#### From that resource, download the associated `config.json` file
+
+![](images/download-config.png)
+
