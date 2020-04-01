@@ -26,3 +26,7 @@ Click the button that says "Download config.json". Once downloaded, place it ins
 
 ![](images/download-config.png)
 
+
+# References
+  - [This great blogpost](https://www.blue-granite.com/blog/train-and-deploy-machine-learning-models-using-the-azureml-service)
+  - [Azure's Notebook Walkthrough](https://github.com/Azure/MachineLearningNotebooks/blob/master/how-to-use-azureml/ml-frameworks/pytorch/deployment/train-hyperparameter-tune-deploy-with-pytorch/train-hyperparameter-tune-deploy-with-pytorch.ipynb)
