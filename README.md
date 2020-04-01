@@ -23,5 +23,6 @@ You'll be prompted to name your workspace, link it to subscription, resource gro
 #### From that resource, download the associated `config.json` file
 
 Click the button that says "Download config.json". Once downloaded, place it inside of this repo (`<some_path>/pytorch-lightning-azureml/config.json`)
+
 ![](images/download-config.png)
 
