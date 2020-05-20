@@ -1,5 +1,7 @@
 *.ckpt
 config.json
+lightning_logs/
+mnist/MNIST/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
