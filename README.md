@@ -1,4 +1,6 @@
-# Instructions
+# WIP - Pytorch Lightning AzureML
+
+## Getting Started
 
 #### Clone this repo
 
