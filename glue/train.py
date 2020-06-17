@@ -1,188 +1,112 @@
-import argparse
-from collections import OrderedDict
 import glob
-import logging
 import os
-import time
 
-import numpy as np
-import torch
-from torch.utils.data import DataLoader, TensorDataset
+from azureml.core.run import Run
 
-from transformer_base import BaseTransformer, add_generic_args, generic_train
-from transformers import glue_compute_metrics as compute_metrics
-from transformers import glue_output_modes
-from transformers import glue_tasks_num_labels
-from azureml.core import Run
+import pandas as pd
+from lightning_base import set_seed
+from lightning_glue import GLUETransformer, parse_args
+from pytorch_lightning import Trainer
+from pytorch_lightning.loggers import LightningLoggerBase
+from pytorch_lightning.utilities import rank_zero_only
 
-
-logger = logging.getLogger(__name__)
-
-mounted_input_path = os.environ['prepared_glue_data']
-print("-----------------INPUT PATH FILE LIST-------------------")
-print(os.listdir(mounted_input_path))
-
+# get the Azure ML run object
 run = Run.get_context()
 
-TASK2PATH = OrderedDict({
-    "cola": "CoLA",
-    "mnli": "MNLI",
-    "mnli-mm": "MNLI",
-    "mrpc": "MRPC",
-    "sst-2": "SST-2",
-    "sts-b": "STS-B",
-    "qqp": "QQP",
-    "qnli": "QNLI",
-    "rte": "RTE",
-    "wnli": "WNLI"
-})
+
+class AzureMLLogger(LightningLoggerBase):
+    def __init__(self):
+        super().__init__()
+
+    @rank_zero_only
+    def log_hyperparams(self, params):
+        pass
+
+    @rank_zero_only
+    def log_metrics(self, metrics, step):
+        for k, v in {**{"step": step}, **metrics}.items():
+            run.log(k, v)
+
+    @property
+    def experiment(self):
+        return ""
+
+    @property
+    def name(self):
+        return ""
+
+    @property
+    def version(self):
+        return ""
 
 
-class GLUETransformer(BaseTransformer):
+def main(args):
 
-    mode = "sequence-classification"
+    # Init Model
+    model = GLUETransformer(args)
 
-    def __init__(self, hparams):
-        hparams.glue_output_mode = glue_output_modes[hparams.task]
-        num_labels = glue_tasks_num_labels[hparams.task]
+    aml_logger = AzureMLLogger()
 
-        super().__init__(hparams, num_labels, self.mode)
+    # Init Trainer
+    trainer = Trainer.from_argparse_args(
+        args, logger=aml_logger, default_root_dir=args.output_dir if bool(args.output_dir) else os.getcwd()
+    )
+    # trainer = Trainer.from_argparse_args(args, default_root_dir='./outputs/')
 
-    def forward(self, **inputs):
-        return self.model(**inputs)
+    # Run training and reload best model from checkpoint
+    if args.do_train:
 
-    def training_step(self, batch, batch_idx):
-        inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
+        # Fit the model
+        trainer.fit(model)
 
-        if self.hparams.model_type != "distilbert":
-            inputs["token_type_ids"] = batch[2] if self.hparams.model_type in ["bert", "xlnet", "albert"] else None
+        # Reload best model from current experiment run's checkpoint directory
+        experiment_ckpt_dir = model.trainer.weights_save_path
+        checkpoints = list(sorted(glob.glob(os.path.join(experiment_ckpt_dir, "epoch=*.ckpt"), recursive=True)))
+        trainer.resume_from_checkpoint = checkpoints[-1]
 
-        outputs = self(**inputs)
-        loss = outputs[0]
+    # Predict on test split and write to submission files
+    if args.do_predict:
 
-        tensorboard_logs = {"loss": loss, "rate": self.lr_scheduler.get_last_lr()[-1]}
-        return {"loss": loss, "log": tensorboard_logs}
+        # If we didn't train and and output directory is not supplied, raise an exception
+        if not args.do_train and not bool(args.output_dir):
+            raise RuntimeError("No output_dir is specified for writing results. Try setting --output_dir flag")
+        # If we did train, but an output_dir was supplied, use the output_dir
+        elif bool(args.output_dir):
+            output_dir = args.output_dir
+        # If we did train and no output_dir was supplied, use lightning_logs/version_x directory
+        elif args.do_train and not bool(args.output_dir):
+            output_dir = os.path.dirname(experiment_ckpt_dir)
 
-    def load_dataset(self, mode, batch_size):
-        "Load datasets. Called after prepare data."
+        # Make the output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
 
-        # We test on dev set to compare to benchmarks without having to submit to GLUE server
-        mode = "dev" if mode == "test" else mode
+        # Run on test data
+        trainer.test(model)
 
-        cached_features_file = self._feature_file(mode)
-        logger.info("Loading features from cached file %s", cached_features_file)
-        features = torch.load(cached_features_file)
-        all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-        all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-        all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
-        if self.hparams.glue_output_mode == "classification":
-            all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
-        elif self.hparams.glue_output_mode == "regression":
-            all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
+        # Have to split MNLI submission into two files for matched and mismatched
+        if args.task == "mnli":
+            df_matched = pd.DataFrame({"idx": model.idxs["matched"], "prediction": model.predictions["matched"]})
+            df_mismatched = pd.DataFrame(
+                {"idx": model.idxs["mismatched"], "prediction": model.predictions["mismatched"]}
+            )
+            df_matched.to_csv(os.path.join(output_dir, "mnli_matched_submission.csv"), index=False)
+            df_mismatched.to_csv(os.path.join(output_dir, "mnli_mismatched_submission.csv"), index=False)
 
-        return DataLoader(
-            TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels),
-            batch_size=batch_size,
-            shuffle=True,
-        )
-
-    def validation_step(self, batch, batch_idx):
-        inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
-
-        if self.hparams.model_type != "distilbert":
-            inputs["token_type_ids"] = batch[2] if self.hparams.model_type in ["bert", "xlnet", "albert"] else None
-
-        outputs = self(**inputs)
-        tmp_eval_loss, logits = outputs[:2]
-        preds = logits.detach().cpu().numpy()
-        out_label_ids = inputs["labels"].detach().cpu().numpy()
-
-        return {"val_loss": tmp_eval_loss.detach().cpu(), "pred": preds, "target": out_label_ids}
-
-    def _eval_end(self, outputs):
-        val_loss_mean = torch.stack([x["val_loss"] for x in outputs]).mean().detach().cpu().item()
-        preds = np.concatenate([x["pred"] for x in outputs], axis=0)
-
-        if self.hparams.glue_output_mode == "classification":
-            preds = np.argmax(preds, axis=1)
-        elif self.hparams.glue_output_mode == "regression":
-            preds = np.squeeze(preds)
-
-        out_label_ids = np.concatenate([x["target"] for x in outputs], axis=0)
-        out_label_list = [[] for _ in range(out_label_ids.shape[0])]
-        preds_list = [[] for _ in range(out_label_ids.shape[0])]
-
-        results = {**{"val_loss": val_loss_mean}, **compute_metrics(self.hparams.task, preds, out_label_ids)}
-
-        ret = {k: v for k, v in results.items()}
-        ret["log"] = results
-        return ret, preds_list, out_label_list
-
-    def validation_end(self, outputs: list) -> dict:
-        ret, preds, targets = self._eval_end(outputs)
-        logs = ret["log"]
-        return {"val_loss": logs["val_loss"], "log": logs, "progress_bar": logs}
-
-    def test_epoch_end(self, outputs):
-        # updating to test_epoch_end instead of deprecated test_end
-        ret, predictions, targets = self._eval_end(outputs)
-
-        # Converting to the dic required by pl
-        # https://github.com/PyTorchLightning/pytorch-lightning/blob/master/\
-        # pytorch_lightning/trainer/logging.py#L139
-        logs = ret["log"]
-        # `val_loss` is the key returned by `self._eval_end()` but actually refers to `test_loss`
-        return {"avg_test_loss": logs["val_loss"], "log": logs, "progress_bar": logs}
-
-    @staticmethod
-    def add_model_specific_args(parser, root_dir):
-        # Add NER specific options
-        BaseTransformer.add_model_specific_args(parser, root_dir)
-        parser.add_argument(
-            "--max_seq_length",
-            default=129,
-            type=int,
-            help="The maximum total input sequence length after tokenization. Sequences longer "
-            "than this will be truncated, sequences shorter will be padded.",
-        )
-
-        parser.add_argument(
-            "--task",
-            default="mrpc",
-            type=str,
-            # required=True,
-            help="The GLUE task to run",
-        )
-
-        parser.add_argument(
-            "--data_dir",
-            default=None,
-            type=str,
-            help="The input data dir. Should contain the training files for the CoNLL-2003 NER task.",
-        )
-
-        return parser
+        # All other tasks have single submission files
+        else:
+            df = pd.DataFrame({"idx": model.idxs, "prediction": model.predictions})
+            df.to_csv(os.path.join(output_dir, f"{args.task}_submission.csv"), index=False)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    add_generic_args(parser, os.getcwd())
-    parser = GLUETransformer.add_model_specific_args(parser, os.getcwd())
-    args = parser.parse_args()
-
-    if args.data_dir is None:
-        args.data_dir = mounted_input_path
-
-    # If output_dir not provided, a folder will be generated in pwd
-    if args.output_dir is None:
-        args.output_dir = os.path.join("./results", f"{args.task}_{args.model_type}_{time.strftime('%Y%m%d_%H%M%S')}",)
-        os.makedirs(args.output_dir)
-
-    model = GLUETransformer(args)
-    trainer = generic_train(model, args)
-
-    # Optionally, predict on dev set and write to output_dir
-    if args.do_predict:
-        checkpoints = list(sorted(glob.glob(os.path.join(args.output_dir, "checkpointepoch=*.ckpt"), recursive=True)))
-        model = model.load_from_checkpoint(checkpoints[-1])
-        trainer.test(model)
+    args = parse_args()
+    args.do_train = True
+    args.do_predict = True
+    args.output_dir = "./outputs"
+    args.data_dir = os.environ["AZUREML_DATAREFERENCE_prepared_data"]
+    run.log("task", args.task)
+    run.log("model_name_or_path", args.model_name_or_path)
+    run.log("learning_rate", args.learning_rate)
+    run.log("seed", args.seed)
+    set_seed(args)
+    main(args)
