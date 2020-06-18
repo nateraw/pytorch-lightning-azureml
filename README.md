@@ -8,7 +8,7 @@ Currently no script to run this one, but will provide one in the future. It show
 
 ### Evaluating HuggingFace Transformers Models on GLUE Benchmark
 
-Below is a table I hope to fill out to document the performance of `transformers` models across the GLUE benchmark (and hopefully other benchmarks in the future). Currently only showing CoLA. Models were run on 5 random seeds and I report the median of these 5 runs.
+Below is a table I hope to fill out to document the performance of `transformers` models across the GLUE benchmark (and hopefully other benchmarks in the future). Currently only showing CoLA. Below, I report the median of 5 runs (w/ different random seeds) on the dev set for each model/task combination.
 
 | Task  | Metric                       | `bert-base-uncased` | `distilbert-base-uncased` |
 |-------|------------------------------|-------|-----|
