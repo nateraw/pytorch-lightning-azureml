@@ -10,12 +10,13 @@ import numpy as np
 import pandas as pd
 import pyarrow
 import torch
+from torch.utils.data import DataLoader
+from transformers.data import glue_tasks_num_labels
+
 from lightning_base import BaseTransformer, LoggingCallback, set_seed
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import LightningLoggerBase, TensorBoardLogger
 from pytorch_lightning.utilities import rank_zero_only
-from torch.utils.data import DataLoader
-from transformers.data import glue_tasks_num_labels
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -60,11 +61,16 @@ class GLUETransformer(BaseTransformer):
             splits = ["train", "validation_matched", "test_matched", "validation_mismatched", "test_mismatched"]
         else:
             splits = ["train", "validation", "test"]
-
-        self.dataset = {}
+        print("Available Files:\n:", ",\n".join(os.listdir(self.hparams.data_dir)))
+        dataset = {}
         for split in splits:
             cached_split_file = self._feature_file(split)
-            self.dataset[split] = torch.load(cached_split_file)
+            print(f"LOADING {split} FROM FILE: {cached_split_file}")
+            split_dataset = torch.load(cached_split_file)
+            dataset[split] = split_dataset
+        self.dataset = dataset
+        for k, v in self.dataset.items():
+            print(f"\t- DATASET SPLIT {k} HAS LENGTH OF {len(v)}")
 
     def get_dataloader(self, mode: str, batch_size: int) -> Union[List[DataLoader], DataLoader]:
         """Get DataLoader(s) corresponding to the given split 'mode'
@@ -133,15 +139,15 @@ class GLUETransformer(BaseTransformer):
             self.predictions = {}
             self.idxs = {}
             for i, split in enumerate(["matched", "mismatched"]):
-                _, split_preds, split_idxs = self._eval_end(outputs[i], split="test")
+                logs, split_preds, split_idxs = self._eval_end(outputs[i], split="test")
                 self.predictions[split] = split_preds
                 self.idxs[split] = split_idxs
 
         # Otherwise, store predictions as List
         else:
-            _, self.predictions, self.idxs = self._eval_end(outputs, split="test")
+            logs, self.predictions, self.idxs = self._eval_end(outputs, split="test")
 
-        return {}
+        return logs
 
     def _eval_step(self, batch, batch_idx, split="val"):
         outputs = self(**batch)

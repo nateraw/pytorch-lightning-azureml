@@ -5,7 +5,6 @@ import os
 import random
 
 import numpy as np
-import pytorch_lightning as pl
 import torch
 from transformers import (AdamW, AutoConfig, AutoModel,
                           AutoModelForPreTraining,
@@ -13,6 +12,8 @@ from transformers import (AdamW, AutoConfig, AutoModel,
                           AutoModelForSequenceClassification,
                           AutoModelForTokenClassification, AutoModelWithLMHead,
                           AutoTokenizer, get_linear_schedule_with_warmup)
+
+import pytorch_lightning as pl
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,8 @@ class BaseTransformer(pl.LightningModule):
     def _feature_file(self, mode):
         return os.path.join(
             self.hparams.data_dir,
-            "cached_{}_{}_{}".format(
+            "cached_{}_{}_{}_{}".format(
+                self.hparams.task,
                 mode,
                 list(filter(None, self.hparams.model_name_or_path.split("/"))).pop(),
                 str(self.hparams.max_seq_length),
@@ -152,11 +154,11 @@ class BaseTransformer(pl.LightningModule):
         parser.add_argument("--eval_batch_size", default=32, type=int)
         parser.add_argument("--num_workers", default=0, type=int)
 
-        # Parse temp args and import xm if using TPU so we have it available in global namespace
-        temp_args, _ = parser.parse_known_args()
-        if temp_args.num_tpu_cores is not None:
-            global xm
-            import xm
+        # # Parse temp args and import xm if using TPU so we have it available in global namespace
+        # temp_args, _ = parser.parse_known_args()
+        # if temp_args.num_tpu_cores is not None:
+        #     global xm
+        #     import xm
 
         return parser
 

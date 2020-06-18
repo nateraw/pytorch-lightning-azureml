@@ -1,9 +1,9 @@
 import glob
 import os
 
+import pandas as pd
 from azureml.core.run import Run
 
-import pandas as pd
 from lightning_base import set_seed
 from lightning_glue import GLUETransformer, parse_args
 from pytorch_lightning import Trainer
@@ -11,7 +11,8 @@ from pytorch_lightning.loggers import LightningLoggerBase
 from pytorch_lightning.utilities import rank_zero_only
 
 # get the Azure ML run object
-run = Run.get_context()
+child_run = Run.get_context()
+run = child_run.parent
 
 
 class AzureMLLogger(LightningLoggerBase):
@@ -51,7 +52,6 @@ def main(args):
     trainer = Trainer.from_argparse_args(
         args, logger=aml_logger, default_root_dir=args.output_dir if bool(args.output_dir) else os.getcwd()
     )
-    # trainer = Trainer.from_argparse_args(args, default_root_dir='./outputs/')
 
     # Run training and reload best model from checkpoint
     if args.do_train:
@@ -61,7 +61,8 @@ def main(args):
 
         # Reload best model from current experiment run's checkpoint directory
         experiment_ckpt_dir = model.trainer.weights_save_path
-        checkpoints = list(sorted(glob.glob(os.path.join(experiment_ckpt_dir, "epoch=*.ckpt"), recursive=True)))
+
+        checkpoints = list(sorted(glob.glob(os.path.join("outputs/checkpoints", "epoch=*.ckpt"), recursive=True)))
         trainer.resume_from_checkpoint = checkpoints[-1]
 
     # Predict on test split and write to submission files
@@ -83,26 +84,24 @@ def main(args):
         # Run on test data
         trainer.test(model)
 
-        # Have to split MNLI submission into two files for matched and mismatched
-        if args.task == "mnli":
-            df_matched = pd.DataFrame({"idx": model.idxs["matched"], "prediction": model.predictions["matched"]})
-            df_mismatched = pd.DataFrame(
-                {"idx": model.idxs["mismatched"], "prediction": model.predictions["mismatched"]}
-            )
-            df_matched.to_csv(os.path.join(output_dir, "mnli_matched_submission.csv"), index=False)
-            df_mismatched.to_csv(os.path.join(output_dir, "mnli_mismatched_submission.csv"), index=False)
+        # TODO - Get this working on multi-gpu.
+        # # Have to split MNLI submission into two files for matched and mismatched
+        # if args.task == "mnli":
+        #     df_matched = pd.DataFrame({"idx": model.idxs["matched"], "prediction": model.predictions["matched"]})
+        #     df_mismatched = pd.DataFrame(
+        #         {"idx": model.idxs["mismatched"], "prediction": model.predictions["mismatched"]}
+        #     )
+        #     df_matched.to_csv(os.path.join(output_dir, "mnli_matched_submission.csv"), index=False)
+        #     df_mismatched.to_csv(os.path.join(output_dir, "mnli_mismatched_submission.csv"), index=False)
 
-        # All other tasks have single submission files
-        else:
-            df = pd.DataFrame({"idx": model.idxs, "prediction": model.predictions})
-            df.to_csv(os.path.join(output_dir, f"{args.task}_submission.csv"), index=False)
+        # # All other tasks have single submission files
+        # else:
+        #     df = pd.DataFrame({"idx": model.idxs, "prediction": model.predictions})
+        #     df.to_csv(os.path.join(output_dir, f"{args.task}_submission.csv"), index=False)
 
 
 if __name__ == "__main__":
     args = parse_args()
-    args.do_train = True
-    args.do_predict = True
-    args.output_dir = "./outputs"
     args.data_dir = os.environ["AZUREML_DATAREFERENCE_prepared_data"]
     run.log("task", args.task)
     run.log("model_name_or_path", args.model_name_or_path)

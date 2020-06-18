@@ -9,13 +9,14 @@ import torch
 from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def main(args):
 
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path)
-
-    for task in ["cola", "mnli", "mrpc", "sst2", "stsb", "qqp", "qnli", "rte", "wnli"]:
+    for task in ["cola", "mrpc"]:
+        # for task in ["cola", "mnli", "mrpc", "sst2", "stsb", "qqp", "qnli", "rte", "wnli"]:
         dataset = nlp.load_dataset("glue", name=task)
 
         # We don't know names of text field(s) so we find that here. If multiple, we tokenize text pairs.
@@ -25,7 +26,7 @@ def main(args):
 
             # Either encode single sentence or sentence pairs
             if len(text_fields) > 1:
-                texts_or_text_pairs = zip(example_batch[text_fields[0]], example_batch[text_fields[1]])
+                texts_or_text_pairs = list(zip(example_batch[text_fields[0]], example_batch[text_fields[1]]))
             else:
                 texts_or_text_pairs = example_batch[text_fields[0]]
 
@@ -46,18 +47,17 @@ def main(args):
         for split in dataset.keys():
             logger.info(f"Preparing {task} - Split: {split}")
             cached_split_file = (
-                Path(args.data_dir) / f"cached_{split}_{args.model_name_or_path}_{str(args.max_seq_length)}"
+                Path(args.data_dir) / f"cached_{task}_{split}_{args.model_name_or_path}_{str(args.max_seq_length)}"
             )
             cached_split_file.parent.mkdir(exist_ok=True)
-            if not cached_split_file.exists():
-                logger.info(f"Did not find cache file {cached_split_file} - Creating it now.")
-                dataset_split = dataset[split].map(
-                    convert_to_features,
-                    remove_columns=drop_cols if not split.startswith("test") else drop_cols[:-1],
-                    batched=True,
-                )
-                dataset_split.set_format(type="torch")
-                torch.save(dataset_split, cached_split_file)
+            dataset_split = dataset[split].map(
+                convert_to_features,
+                remove_columns=drop_cols if not split.startswith("test") else drop_cols[:-1],
+                batched=True,
+                load_from_cache_file=False,
+            )
+            dataset_split.set_format(type="torch")
+            torch.save(dataset_split, cached_split_file)
 
 
 def parse_args(args=None):
@@ -84,7 +84,7 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--data_dir",
-        default=os.environ["AZUREML_DATAREFERENCE_prepared_data"],
+        default=os.environ.get("AZUREML_DATAREFERENCE_prepared_data"),
         type=str,
         help="Directory to save/load processed cache data",
     )

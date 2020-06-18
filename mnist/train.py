@@ -1,13 +1,11 @@
 import os
 from argparse import ArgumentParser
 
+from model import MNISTModel
 from pytorch_lightning import Trainer
 
-from model import MNISTModel
-
-
 parser = ArgumentParser()
-parser.add_argument('--data_dir', type=str, default=os.environ.get('MNIST_DIR', '.'))
+parser.add_argument("--data_dir", type=str, default=os.environ.get("MNIST_DIR", "."))
 
 parser = Trainer.add_argparse_args(parser)
 parser = MNISTModel.add_model_specific_args(parser)
