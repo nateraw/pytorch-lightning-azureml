@@ -41,7 +41,7 @@ train_script_name = "train.py"
 experiment_name = "glue_benchmark_mprc"
 
 # A name for your compute target (name it whatever ya want)
-compute_target_name = "big-cluster"
+compute_target_name = "gpu-cluster"
 
 # Azure specific VM name. This one has a K80 GPU, 6 cores, 56GB RAM, and 380GB Disk Space
 # Here's a good link on different VMs and their pricing...
@@ -151,22 +151,22 @@ train_step = EstimatorStep(
 step_sequence = StepSequence(steps=[prepare_step, train_step])
 pipeline = Pipeline(workspace, steps=step_sequence)
 
-# If you want to just run a single model run w/ default pipeline params, use this command
-# run = experiment.submit(pipeline)
+# Submit single experiment run
+run = experiment.submit(pipeline)
 
-# Run the three listed models over 5 random seeds.
-for seed in range(5):
-    for model in ["distilbert-base-cased", "bert-base-cased", "albert-base-v2"]:
-        run = experiment.submit(
-            pipeline,
-            pipeline_parameters={
-                "model_name_or_path": model,
-                "task": "cola",
-                "train_batch_size": 32,
-                "eval_batch_size": 32,
-                "gpus": 4,
-                "seed": seed,
-                "num_workers": 16,
-                "max_epochs": 4,
-            },
-        )
+# Run the three listed models over 5 random seeds. (15 experiment runs total)
+# for seed in range(5):
+#     for model in ["distilbert-base-cased", "bert-base-cased", "albert-base-v2"]:
+#         run = experiment.submit(
+#             pipeline,
+#             pipeline_parameters={
+#                 "model_name_or_path": model,
+#                 "task": "cola",
+#                 "train_batch_size": 32,
+#                 "eval_batch_size": 32,
+#                 "gpus": 4,
+#                 "seed": seed,
+#                 "num_workers": 16,
+#                 "max_epochs": 4,
+#             },
+#         )
