@@ -15,8 +15,9 @@ logger.setLevel(logging.INFO)
 def main(args):
 
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path)
-    for task in ["cola", "mrpc"]:
-        # for task in ["cola", "mnli", "mrpc", "sst2", "stsb", "qqp", "qnli", "rte", "wnli"]:
+
+    # NOTE - This might take a while...if you want, go ahead and limit this list while debugging
+    for task in ["cola", "mnli", "mrpc", "sst2", "stsb", "qqp", "qnli", "rte", "wnli"]:
         dataset = nlp.load_dataset("glue", name=task)
 
         # We don't know names of text field(s) so we find that here. If multiple, we tokenize text pairs.
